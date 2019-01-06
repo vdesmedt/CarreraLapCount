@@ -18,7 +18,9 @@
 #define MINLAPTime 2000
 #define SLEEPTimeout 300000
 
-enum states_t {SYNC, WAIT, WARMUP, RUN, SETUP, SLEEP, RESULT};
+#define MINIRSig 800
+
+enum states_t {SYNC, WAIT, WARMUP, RUN, SETUP, SLEEP, RESULT, FALSE_START};
 states_t STATE;
 
 LiquidCrystal_I2C displays[] = {
@@ -40,13 +42,14 @@ uint32_t refreshRate = 100;
 bool forceRefresh = false;
 uint32_t lastClickTime = millis();
 uint8_t raceLapCount = 0;
+bool false_starts[] = {false, false};
 
 void start_click();
 void start_longpress();
 void printTime(LiquidCrystal_I2C* display, uint32_t time) {
   static char buffer[6];
   int t = time / 100;
-  sprintf(buffer, "%02d\.%d", t/10, t%10);
+  sprintf(buffer, "%02d.%d", t/10, t%10);
   display->print(buffer);
 }
 
@@ -63,6 +66,7 @@ void sync() {
 }
 
 void warmup() {
+  false_starts[0] = false_starts[1] = false;
   t0 = millis() + 4999;
   for(int i=0; i<2; i++) {
     displays[i].clear();
@@ -70,6 +74,19 @@ void warmup() {
     displays[i].print("Get Ready...");
   }
   STATE = WARMUP;
+}
+
+void false_start() {
+  for(int i=0; i<2; i++) {
+    if(false_starts[i]) {
+      displays[i].clear();
+      displays[i].print("Départ précoce !");      
+    }
+    else
+    {
+      displays[i].clear();
+    }
+  }
 }
 
 void run() {
@@ -149,6 +166,9 @@ void start_click() {
     case WARMUP:
       warmup();
       break;
+    case FALSE_START:
+      wait();
+      break;
     case SETUP:    
       raceLapCount++;
       if(raceLapCount > 20)
@@ -178,6 +198,9 @@ void start_longpress() {
       config();
       break;
     case WARMUP:
+      config();
+      break;
+    case FALSE_START:
       config();
       break;
     case RUN:
@@ -243,7 +266,7 @@ void loop() {
     case SYNC:
       for(int i=0; i<2; i++) {
         syncIrSigStrength[i] = analogRead(irPin[i]);
-        if(syncIrSigStrength[i] < 800) syncLastIrOk[i] = millis();
+        if(syncIrSigStrength[i] < MINIRSig) syncLastIrOk[i] = millis();
       }
       if(syncLastIrOk[0] + 2000 < millis() && syncLastIrOk[1] + 2000 < millis())
         wait();
@@ -263,9 +286,20 @@ void loop() {
         shiftOut(SER_Pin, RCLK_Pin, MSBFIRST, 63-pow(2, 5-warmupPhase/2)+1);
         digitalWrite(SRCLK_Pin, HIGH);
 
-        if(millis() > t0) {
-          run();
+        for(int i=0; i<2 ; i++)
+        {
+          if(digitalRead(irPin[i] > MINIRSig))
+            false_starts[i] = true;
         }
+
+        if(millis() > t0) {
+          if(false_starts[0] || false_starts[1])
+            false_start();
+          else
+            run();
+        }
+      break;
+    case FALSE_START:
       break;
     case RUN:
       if(millis() > t0+1000) {
@@ -275,9 +309,9 @@ void loop() {
       for(int i=0 ; i<2 ; i++)
       {
           int ir = analogRead(irPin[i]);
-          if(ir > 800)
+          if(ir > MINIRSig)
             lastHighIrTime[i] = millis();
-          if(millis() > lapStart[i]+MINLAPTime &&  ir < 800 && lastIrValue[i] > 800) {
+          if(millis() > lapStart[i]+MINLAPTime &&  ir < MINIRSig && lastIrValue[i] > MINIRSig) {
             /* Car detected */
             unsigned long t = millis();
             lapCount[i]++;
@@ -335,6 +369,8 @@ void loop() {
         }
         break;
       case WARMUP:
+        break;
+      case FALSE_START:
         break;
       case RUN:
         for(int i = 0 ; i<2 ; i++) {
