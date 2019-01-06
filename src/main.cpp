@@ -18,7 +18,7 @@
 #define MINLAPTime 2000
 #define SLEEPTimeout 300000
 
-#define MINIRSig 800
+#define MINIRSig 600
 
 enum states_t {SYNC, WAIT, WARMUP, RUN, SETUP, SLEEP, RESULT, FALSE_START};
 states_t STATE;
@@ -54,6 +54,7 @@ void printTime(LiquidCrystal_I2C* display, uint32_t time) {
 }
 
 void sync() {
+  refreshRate = 100;
   digitalWrite(SWLED_Pin, LOW);
   for(int i=0; i<2; i++) {
     displays[i].clear();
@@ -66,6 +67,7 @@ void sync() {
 }
 
 void warmup() {
+  refreshRate = 100;
   false_starts[0] = false_starts[1] = false;
   t0 = millis() + 4999;
   for(int i=0; i<2; i++) {
@@ -77,6 +79,7 @@ void warmup() {
 }
 
 void false_start() {
+  refreshRate = 100;
   for(int i=0; i<2; i++) {
     if(false_starts[i]) {
       displays[i].clear();
@@ -90,8 +93,8 @@ void false_start() {
 }
 
 void run() {
-  digitalWrite(SWLED_Pin, LOW);
   refreshRate = 100;
+  digitalWrite(SWLED_Pin, LOW);
   tone(BUZZ_Pin, 2000);
   digitalWrite(SRCLK_Pin, LOW);
   shiftOut(SER_Pin, RCLK_Pin, MSBFIRST, 0);
@@ -112,6 +115,8 @@ void run() {
 }
 
 void result() {
+  refreshRate = 1000;
+  forceRefresh = true;
   for(int i=0; i<2; i++) {
     displays[i].clear();
     if(i == winner) {
@@ -127,12 +132,13 @@ void result() {
 void wait() {
   digitalWrite(SWLED_Pin, HIGH);
   refreshRate = 1000;
+  forceRefresh = true;
   STATE = WAIT;
 }
 
 void config() {
   digitalWrite(SWLED_Pin, HIGH);
-  refreshRate = 200;
+  refreshRate = 200;  
   displays[1].clear();
   displays[0].clear();
   displays[1].print("Race Lap :");
