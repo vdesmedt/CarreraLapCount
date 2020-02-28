@@ -5,9 +5,9 @@
 #include <OneButton.h>
 #include <EEPROM.h>
 
-#define SER_Pin 4
-#define RCLK_Pin 6
-#define SRCLK_Pin 5
+#define SR_DATAPin 4
+#define SR_CLOCKPin 6
+#define SR_STORECLK_Pin 5
 #define BUZZ_Pin 9
 #define SW_Pin 11
 #define SWLED_Pin 10
@@ -19,6 +19,7 @@
 #define SLEEPTimeout 300000
 
 #define MINIRSig 600
+#define MINIRSigForSync 800
 
 enum states_t
 {
@@ -42,16 +43,17 @@ uint32_t t0 = 0;
 uint32_t te = 0;
 uint8_t winner = -1;
 uint32_t lapCount[2];
-uint32_t lapStart[2];
+uint32_t lapStartTime[2];
+uint32_t lastLapTime[2] = {0, 0};
 uint32_t bestLap[2];
-uint8_t irPin[] = {IR1_Pin, IR2_Pin};
+uint8_t irPin[2] = {IR1_Pin, IR2_Pin};
 uint32_t lastIrValue[2];
-uint32_t lastHighIrTime[] = {0, 0};
+uint32_t lastHighIrTime[2] = {0, 0};
 uint32_t refreshRate = 100;
 bool forceRefresh = false;
 uint32_t lastClickTime = millis();
-uint8_t raceLapCount = 0;
-bool false_starts[] = {false, false};
+uint8_t targetLapCount = 0;
+bool false_starts[2] = {false, false};
 
 void start_click();
 void start_longpress();
@@ -94,19 +96,23 @@ void warmup()
 
 void false_start()
 {
-  refreshRate = 100;
+  digitalWrite(SR_STORECLK_Pin, LOW);
+  shiftOut(SR_DATAPin, SR_CLOCKPin, MSBFIRST, 0);
+  digitalWrite(SR_STORECLK_Pin, HIGH);
+  refreshRate = 500;
   for (int i = 0; i < 2; i++)
   {
     if (false_starts[i])
     {
       displays[i].clear();
-      displays[i].print("Départ précoce !");
+      displays[i].print("Faux Depart  !");
     }
     else
     {
       displays[i].clear();
     }
   }
+  STATE = FALSE_START;
 }
 
 void run()
@@ -114,9 +120,9 @@ void run()
   refreshRate = 100;
   digitalWrite(SWLED_Pin, LOW);
   tone(BUZZ_Pin, 2000);
-  digitalWrite(SRCLK_Pin, LOW);
-  shiftOut(SER_Pin, RCLK_Pin, MSBFIRST, 0);
-  digitalWrite(SRCLK_Pin, HIGH);
+  digitalWrite(SR_STORECLK_Pin, LOW);
+  shiftOut(SR_DATAPin, SR_CLOCKPin, MSBFIRST, 0);
+  digitalWrite(SR_STORECLK_Pin, HIGH);
   for (int i = 0; i < 2; i++)
   {
     displays[i].clear();
@@ -130,8 +136,9 @@ void run()
     displays[i].print("Pos:");
 
     lapCount[i] = 0;
-    lapStart[i] = t0;
+    lapStartTime[i] = t0;
     bestLap[i] = UINT32_MAX;
+    lastLapTime[i] = 0;
     lastIrValue[i] = 0;
   }
   STATE = RUN;
@@ -201,8 +208,6 @@ void start_click()
   case SYNC:
     break;
   case WAIT:
-    warmup();
-    break;
   case WARMUP:
     warmup();
     break;
@@ -210,9 +215,9 @@ void start_click()
     wait();
     break;
   case SETUP:
-    raceLapCount++;
-    if (raceLapCount > 20)
-      raceLapCount = 0;
+    targetLapCount++;
+    if (targetLapCount > 20)
+      targetLapCount = 0;
     break;
   case RUN:
     warmup();
@@ -237,22 +242,14 @@ void start_longpress()
   case SYNC:
     break;
   case WAIT:
-    config();
-    break;
   case WARMUP:
-    config();
-    break;
   case FALSE_START:
-    config();
-    break;
+  case RESULT:
   case RUN:
     config();
     break;
-  case RESULT:
-    config();
-    break;
   case SETUP:
-    EEPROM.update(0, raceLapCount);
+    EEPROM.update(0, targetLapCount);
     wait();
     break;
   case SLEEP:
@@ -264,25 +261,29 @@ void start_longpress()
 
 void setup()
 {
-  pinMode(SER_Pin, OUTPUT);
-  pinMode(RCLK_Pin, OUTPUT);
-  pinMode(SRCLK_Pin, OUTPUT);
+  pinMode(SR_DATAPin, OUTPUT);
+  pinMode(SR_CLOCKPin, OUTPUT);
+  pinMode(SR_STORECLK_Pin, OUTPUT);
   pinMode(BUZZ_Pin, OUTPUT);
   pinMode(SWLED_Pin, OUTPUT);
   pinMode(IR1_Pin, INPUT);
   pinMode(IR2_Pin, INPUT);
   pinMode(BEACON_Pin, OUTPUT);
   digitalWrite(SWLED_Pin, HIGH);
-  raceLapCount = EEPROM.read(0);
+  targetLapCount = EEPROM.read(0);
 
-  Serial.begin(57600);
+  for (int i = 0; i < 2; i++)
+  {
+    displays[i].begin(16, 2);
+  }
 
-  displays[0].begin(16, 2);
-  displays[1].begin(16, 2);
-
-  digitalWrite(SRCLK_Pin, LOW);
-  shiftOut(SER_Pin, RCLK_Pin, MSBFIRST, 0);
-  digitalWrite(SRCLK_Pin, HIGH);
+  digitalWrite(SR_STORECLK_Pin, LOW);
+  shiftOut(SR_DATAPin, SR_CLOCKPin, MSBFIRST, 255);
+  digitalWrite(SR_STORECLK_Pin, HIGH);
+  delay(500);
+  digitalWrite(SR_STORECLK_Pin, LOW);
+  shiftOut(SR_DATAPin, SR_CLOCKPin, MSBFIRST, 0);
+  digitalWrite(SR_STORECLK_Pin, HIGH);
 
   startButton.attachClick(start_click);
   startButton.attachLongPressStart(start_longpress);
@@ -291,37 +292,46 @@ void setup()
 
 void loop()
 {
-  static uint32_t syncLastIrOk[] = {millis(), millis()};
-  static int syncIrSigStrength[] = {0, 0};
-  static int warmupPhase = 0;
-  static bool newBestLap[]{false, false};
+  int IrSig[2] = {0, 0};
+  static bool newBestLap[] = {false, false};
   static bool newPosition[] = {true, true};
   static bool newLap[] = {true, true};
-  static uint8_t positions[]{1, 2};
+  static uint8_t positions[] = {1, 2};
+  int warmupPhase;
 
   digitalWrite(BEACON_Pin, HIGH);
   startButton.tick();
 
-  if (lastClickTime + SLEEPTimeout < millis() && lapStart[0] + SLEEPTimeout < millis() && lapStart[1] + SLEEPTimeout < millis())
+  if (lastClickTime + SLEEPTimeout < millis() && lapStartTime[0] + SLEEPTimeout < millis() && lapStartTime[1] + SLEEPTimeout < millis())
     sleep();
+
+  //Read ir signal
+  for (int i = 0; i < 2; i++)
+  {
+    IrSig[i] = analogRead(irPin[i]);
+    if (IrSig[i] > MINIRSig)
+      lastHighIrTime[i] = millis();
+    if (lastHighIrTime[i] + 5000 < millis())
+      sync();
+  }
 
   switch (STATE)
   {
   case SYNC:
+    static uint32_t syncLastIrNOk[2] = {millis(), millis()};
     for (int i = 0; i < 2; i++)
     {
-      syncIrSigStrength[i] = analogRead(irPin[i]);
-      if (syncIrSigStrength[i] < MINIRSig)
-        syncLastIrOk[i] = millis();
+      if (IrSig[i] < MINIRSigForSync)
+        syncLastIrNOk[i] = millis();
     }
-    if (syncLastIrOk[0] + 2000 < millis() && syncLastIrOk[1] + 2000 < millis())
+    if (syncLastIrNOk[0] + 2000 < millis() && syncLastIrNOk[1] + 2000 < millis())
       wait();
     break;
   case WAIT:
     break;
   case WARMUP:
     refreshRate = 200;
-    warmupPhase = (t0 - millis()) / 500;
+    warmupPhase = (t0 - millis()) / 500; // Goes from 9 to 0
     if (warmupPhase % 2 == 1)
     {
       tone(BUZZ_Pin, 100);
@@ -330,46 +340,36 @@ void loop()
     {
       noTone(BUZZ_Pin);
     }
-    digitalWrite(SRCLK_Pin, LOW);
-    shiftOut(SER_Pin, RCLK_Pin, MSBFIRST, 63 - pow(2, 5 - warmupPhase / 2) + 1);
-    digitalWrite(SRCLK_Pin, HIGH);
+    digitalWrite(SR_STORECLK_Pin, LOW);
+    shiftOut(SR_DATAPin, SR_CLOCKPin, MSBFIRST, 65 - pow(2, 5 - floor(warmupPhase / 2)));
+    digitalWrite(SR_STORECLK_Pin, HIGH);
 
+    //False start detection
     for (int i = 0; i < 2; i++)
-    {
-      if (digitalRead(irPin[i] > MINIRSig))
+      if (IrSig[i] < MINIRSig)
         false_starts[i] = true;
-    }
+    if (false_starts[0] || false_starts[1])
+      false_start();
 
-    if (millis() > t0)
-    {
-      if (false_starts[0] || false_starts[1])
-        false_start();
-      else
-        run();
-    }
-    break;
-  case FALSE_START:
+    if (millis() >= t0)
+      run();
     break;
   case RUN:
     if (millis() > t0 + 1000)
-    {
       noTone(BUZZ_Pin);
-    }
     /*Lap Detection*/
     for (int i = 0; i < 2; i++)
     {
-      int ir = analogRead(irPin[i]);
-      if (ir > MINIRSig)
-        lastHighIrTime[i] = millis();
-      if (millis() > lapStart[i] + MINLAPTime && ir < MINIRSig && lastIrValue[i] > MINIRSig)
+      if (millis() > lapStartTime[i] + MINLAPTime && IrSig[i] < MINIRSig && lastIrValue[i] > MINIRSig)
       {
         /* Car detected */
         unsigned long t = millis();
         lapCount[i]++;
+        lastLapTime[i] = t - lapStartTime[i];
         newLap[i] = true;
-        if (bestLap[i] != 0 && t - lapStart[i] < bestLap[i])
+        if (bestLap[i] != 0 && lastLapTime[i] < bestLap[i])
         {
-          bestLap[i] = t - lapStart[i];
+          bestLap[i] = lastLapTime[i];
           newBestLap[i] = true;
         }
 
@@ -383,12 +383,10 @@ void loop()
           }
         }
 
-        lapStart[i] = t;
+        lapStartTime[i] = t;
       }
-      lastIrValue[i] = ir;
-      if (millis() > t0 + 5000 && lastHighIrTime[i] + 5000 < millis())
-        sync();
-      if (raceLapCount > 0 && lapCount[i] >= raceLapCount)
+      lastIrValue[i] = IrSig[i];
+      if (targetLapCount > 0 && lapCount[i] >= targetLapCount)
       {
         te = millis();
         winner = i;
@@ -396,10 +394,17 @@ void loop()
       }
     }
     break;
+  case FALSE_START:
+    if (t0 + 1000 > millis())
+      tone(BUZZ_Pin, 100);
+    else
+      noTone(BUZZ_Pin);
+
+    if (t0 + 5000 < millis())
+      wait();
+    break;
   case RESULT:
-    break;
   case SETUP:
-    break;
   case SLEEP:
     break;
   }
@@ -416,7 +421,7 @@ void loop()
       for (int i = 0; i < 2; i++)
       {
         displays[i].setCursor(5, 1);
-        displays[i].print(syncIrSigStrength[i]);
+        displays[i].print(IrSig[i]);
         displays[i].print("   ");
       }
       break;
@@ -434,11 +439,10 @@ void loop()
     case RUN:
       for (int i = 0; i < 2; i++)
       {
-        unsigned long lap = millis() - lapStart[i];
         if (newLap[i])
         {
           displays[i].setCursor(4, 0);
-          displays[i].print(raceLapCount == 0 ? lapCount[i] : raceLapCount - lapCount[i]);
+          displays[i].print(targetLapCount == 0 ? lapCount[i] : targetLapCount - lapCount[i]);
           newLap[i] = false;
         }
         if (newBestLap[i])
@@ -448,6 +452,7 @@ void loop()
           newBestLap[i] = false;
         }
         displays[i].setCursor(5, 1);
+        unsigned long lap = lastLapTime[i] > 0 && lapStartTime[i] + MINLAPTime > millis() ? lastLapTime[i] : millis() - lapStartTime[i];
         printTime(&displays[i], lap);
         if (newPosition[i])
         {
@@ -467,7 +472,7 @@ void loop()
       displays[1].setCursor(10, 0);
       displays[1].print("   ");
       displays[1].setCursor(10, 0);
-      displays[1].print(raceLapCount);
+      displays[1].print(targetLapCount);
       break;
     case SLEEP:
       digitalWrite(SWLED_Pin, HIGH);
