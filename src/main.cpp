@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include <LCD.h>
-#include <LiquidCrystal_I2C.h>
+#include <LiquidCrystal_PCF8574.h>
 #include <OneButton.h>
 #include <EEPROM.h>
 
@@ -34,9 +33,9 @@ enum states_t
 };
 states_t STATE;
 
-LiquidCrystal_I2C displays[] = {
-    LiquidCrystal_I2C(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE),
-    LiquidCrystal_I2C(0x26, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE)};
+LiquidCrystal_PCF8574 displays[] = {
+    LiquidCrystal_PCF8574(0x27),
+    LiquidCrystal_PCF8574(0x26)};
 OneButton startButton(SW_Pin, true);
 
 uint32_t t0 = 0;
@@ -57,7 +56,7 @@ bool false_starts[2] = {false, false};
 
 void start_click();
 void start_longpress();
-void printTime(LiquidCrystal_I2C *display, uint32_t time)
+void printTime(LiquidCrystal_PCF8574 *display, uint32_t time)
 {
   static char buffer[6];
   int t = time / 100;
@@ -186,7 +185,7 @@ void sleep()
   refreshRate = 5000;
   for (int i = 0; i < 2; i++)
   {
-    displays[i].noBacklight();
+    displays[i].setBacklight(0);
     displays[i].clear();
     displays[i].print("Zzzzzzzzzzzz");
   }
@@ -196,8 +195,9 @@ void sleep()
 
 void wakeup()
 {
-  displays[0].backlight();
-  displays[1].backlight();
+  displays[0].setBacklight(255);
+  displays[1].setBacklight(255);
+  wait();
 }
 
 void start_click()
@@ -223,13 +223,12 @@ void start_click()
     warmup();
     break;
   case RESULT:
-    displays[0].backlight();
-    displays[1].backlight();
+    displays[0].setBacklight(255);
+    displays[1].setBacklight(255);
     warmup();
     break;
   case SLEEP:
     wakeup();
-    wait();
     break;
   }
 }
@@ -275,6 +274,7 @@ void setup()
   for (int i = 0; i < 2; i++)
   {
     displays[i].begin(16, 2);
+    displays[i].setBacklight(128);
   }
 
   digitalWrite(SR_STORECLK_Pin, LOW);
@@ -464,9 +464,9 @@ void loop()
       break;
     case RESULT:
       if ((millis() - te) % 1000 < 500)
-        displays[winner].backlight();
+        displays[winner].setBacklight(255);
       else
-        displays[winner].noBacklight();
+        displays[winner].setBacklight(0);
       break;
     case SETUP:
       displays[1].setCursor(10, 0);
