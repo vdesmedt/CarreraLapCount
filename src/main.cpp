@@ -208,8 +208,10 @@ void start_click()
   case SYNC:
     break;
   case WAIT:
-  case WARMUP:
     warmup();
+    break;
+  case WARMUP:
+    wait();
     break;
   case FALSE_START:
     wait();
@@ -220,7 +222,7 @@ void start_click()
       targetLapCount = 0;
     break;
   case RUN:
-    warmup();
+    wait();
     break;
   case RESULT:
     displays[0].setBacklight(255);
@@ -274,7 +276,7 @@ void setup()
   for (int i = 0; i < 2; i++)
   {
     displays[i].begin(16, 2);
-    displays[i].setBacklight(128);
+    displays[i].setBacklight(255);
   }
 
   digitalWrite(SR_STORECLK_Pin, LOW);
