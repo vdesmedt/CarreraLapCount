@@ -14,7 +14,7 @@
 #define IR2_Pin A2
 #define BEACON_Pin 7
 
-#define MINLAPTime 2000
+#define MINLAPTime 1500
 #define SLEEPTimeout 300000
 
 #define MINIRSig 600
@@ -167,6 +167,11 @@ void wait()
   digitalWrite(SWLED_Pin, HIGH);
   refreshRate = 1000;
   forceRefresh = true;
+  for (int i = 0; i < 2; i++)
+  {
+    displays[i].clear();
+    displays[i].print("Press start");
+  }
   STATE = WAIT;
 }
 
@@ -428,14 +433,7 @@ void loop()
       }
       break;
     case WAIT:
-      for (int i = 0; i < 2; i++)
-      {
-        displays[i].clear();
-        displays[i].print("Press start");
-      }
-      break;
     case WARMUP:
-      break;
     case FALSE_START:
       break;
     case RUN:
