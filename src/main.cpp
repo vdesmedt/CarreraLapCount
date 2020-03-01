@@ -166,7 +166,6 @@ void wait()
 {
   digitalWrite(SWLED_Pin, HIGH);
   refreshRate = 1000;
-  forceRefresh = true;
   for (int i = 0; i < 2; i++)
   {
     displays[i].clear();
