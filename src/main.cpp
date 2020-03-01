@@ -3,6 +3,7 @@
 #include <LiquidCrystal_PCF8574.h>
 #include <OneButton.h>
 #include <EEPROM.h>
+#include <lcdchars.h>
 
 #define SR_DATAPin 4
 #define SR_CLOCKPin 6
@@ -41,10 +42,12 @@ OneButton startButton(SW_Pin, true);
 uint32_t t0 = 0;
 uint32_t te = 0;
 uint8_t winner = -1;
+bool carStarted[2];
 uint32_t lapCount[2];
 uint32_t lapStartTime[2];
 uint32_t lastLapTime[2] = {0, 0};
 uint32_t bestLap[2];
+uint8_t bestLapLap[2];
 uint8_t irPin[2] = {IR1_Pin, IR2_Pin};
 uint32_t lastIrValue[2];
 uint32_t lastHighIrTime[2] = {0, 0};
@@ -125,18 +128,20 @@ void run()
   for (int i = 0; i < 2; i++)
   {
     displays[i].clear();
-    displays[i].setCursor(0, 0);
-    displays[i].print("LAP:"); //LAP:## Best:##.#
-    displays[i].setCursor(7, 0);
-    displays[i].print("Best:");
-    displays[i].setCursor(0, 1);
-    displays[i].print("Time:"); //Time:##.# Pos:#
-    displays[i].setCursor(11, 1);
-    displays[i].print("Pos:");
 
+    displays[i].setCursor(0, 0);
+    displays[i].write(1); //Time
+    displays[i].setCursor(0, 1);
+    displays[i].write(2); //Heart
+
+    displays[i].setCursor(10, 0);
+    displays[i].write(3); //Hash
+
+    carStarted[i] = false;
     lapCount[i] = 0;
     lapStartTime[i] = t0;
     bestLap[i] = UINT32_MAX;
+    bestLapLap[i] = 0;
     lastLapTime[i] = 0;
     lastIrValue[i] = 0;
   }
@@ -281,6 +286,11 @@ void setup()
   {
     displays[i].begin(16, 2);
     displays[i].setBacklight(255);
+    displays[i].createChar(1, Clock);
+    displays[i].createChar(2, Heart);
+    displays[i].createChar(3, Hash);
+    displays[i].createChar(4, Happy);
+    displays[i].createChar(5, Sad);
   }
 
   digitalWrite(SR_STORECLK_Pin, LOW);
@@ -300,7 +310,6 @@ void loop()
 {
   int IrSig[2] = {0, 0};
   static bool newBestLap[] = {false, false};
-  static bool newPosition[] = {true, true};
   static bool newLap[] = {true, true};
   static uint8_t positions[] = {1, 2};
   int warmupPhase;
@@ -366,29 +375,37 @@ void loop()
     /*Lap Detection*/
     for (int i = 0; i < 2; i++)
     {
-      if (millis() > lapStartTime[i] + MINLAPTime && IrSig[i] < MINIRSig && lastIrValue[i] > MINIRSig)
+      if (IrSig[i] < MINIRSig && lastIrValue[i] > MINIRSig)
       {
         /* Car detected */
         unsigned long t = millis();
-        lapCount[i]++;
-        lastLapTime[i] = t - lapStartTime[i];
-        newLap[i] = true;
-        if (bestLap[i] != 0 && lastLapTime[i] < bestLap[i])
+        if (!carStarted[i])
         {
-          bestLap[i] = lastLapTime[i];
-          newBestLap[i] = true;
+          carStarted[i] = true;
         }
-
-        if (lapCount[i] > lapCount[1 - i])
+        else
         {
-          if (positions[i] != 1)
+          lastLapTime[i] = t - lapStartTime[i];
+          lapCount[i]++;
+          newLap[i] = true;
+          //Best lap ?
+          if (bestLap[i] != 0 && lastLapTime[i] < bestLap[i])
           {
-            positions[i] = 1;
-            positions[1 - i] = 2;
-            newPosition[0] = newPosition[1] = true;
+            bestLap[i] = lastLapTime[i];
+            bestLapLap[i] = lapCount[i];
+            newBestLap[i] = true;
+          }
+
+          //First position ?
+          if (lapCount[i] > lapCount[1 - i])
+          {
+            if (positions[i] != 1)
+            {
+              positions[i] = 1;
+              positions[1 - i] = 2;
+            }
           }
         }
-
         lapStartTime[i] = t;
       }
       lastIrValue[i] = IrSig[i];
@@ -440,25 +457,24 @@ void loop()
       {
         if (newLap[i])
         {
-          displays[i].setCursor(4, 0);
+          displays[i].setCursor(11, 0);
           displays[i].print(targetLapCount == 0 ? lapCount[i] : targetLapCount - lapCount[i]);
+          displays[i].setCursor(14, 0);
+          displays[i].write((byte)(positions[i] == 1 ? 4 : 5));
           newLap[i] = false;
         }
         if (newBestLap[i])
         {
-          displays[i].setCursor(12, 0);
+          displays[i].setCursor(1, 1);
           printTime(&displays[i], bestLap[i]);
+          displays[i].print(" (Lap ");
+          displays[i].print(bestLapLap[i]);
+          displays[i].print(")");
           newBestLap[i] = false;
         }
-        displays[i].setCursor(5, 1);
+        displays[i].setCursor(1, 0);
         unsigned long lap = lastLapTime[i] > 0 && lapStartTime[i] + MINLAPTime > millis() ? lastLapTime[i] : millis() - lapStartTime[i];
         printTime(&displays[i], lap);
-        if (newPosition[i])
-        {
-          displays[i].setCursor(15, 1);
-          displays[i].print(positions[i]);
-          newPosition[i] = false;
-        }
       }
       break;
     case RESULT:
