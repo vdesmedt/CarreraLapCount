@@ -48,7 +48,7 @@ uint32_t bestLap[2];
 uint8_t irPin[2] = {IR1_Pin, IR2_Pin};
 uint32_t lastIrValue[2];
 uint32_t lastHighIrTime[2] = {0, 0};
-uint32_t refreshRate = 100;
+uint32_t refreshRate = 200;
 bool forceRefresh = false;
 uint32_t lastClickTime = millis();
 uint8_t targetLapCount = 0;
@@ -66,7 +66,7 @@ void printTime(LiquidCrystal_PCF8574 *display, uint32_t time)
 
 void sync()
 {
-  refreshRate = 100;
+  refreshRate = 200;
   digitalWrite(SWLED_Pin, LOW);
   for (int i = 0; i < 2; i++)
   {
@@ -81,7 +81,7 @@ void sync()
 
 void warmup()
 {
-  refreshRate = 100;
+  refreshRate = 200;
   false_starts[0] = false_starts[1] = false;
   t0 = millis() + 4999;
   for (int i = 0; i < 2; i++)
@@ -313,7 +313,7 @@ void loop()
     IrSig[i] = analogRead(irPin[i]);
     if (IrSig[i] > MINIRSig)
       lastHighIrTime[i] = millis();
-    if (lastHighIrTime[i] + 5000 < millis())
+    if (STATE != SYNC && lastHighIrTime[i] + 5000 < millis())
       sync();
   }
 
